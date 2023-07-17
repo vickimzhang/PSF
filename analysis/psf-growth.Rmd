@@ -1,0 +1,1586 @@
+---
+title: "Plant-Soil Feedback Greenhouse Experiment - Soil and Growth Results (Dark & Light, with errors)"
+author: "Vicki M. Zhang"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  code_folding: hide
+  pdf_document: default
+  word_document: default
+always_allow_html: yes
+---
+# Setting up
+
+## Packages
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(here)
+library(readr)
+library(tidyverse)
+library(ggrepel)
+library(ggstar)
+library(ggpubr)
+library(ggfortify)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(rnaturalearth)
+library(ggspatial)
+library(sf)
+library(rstatix)
+library(vegan)
+library(car)
+library(broom.mixed)
+library(emmeans)
+library(multcomp)
+library(patchwork)
+library(sjPlot)
+library(ggmap)
+library(ggsn)
+library(lsr)
+```
+
+## Theme
+
+```{r classic theme}
+theme_vz <- function(){ 
+    font <- "Helvetica"   #assign font family up front
+    
+    theme_classic() %+replace%    #replace elements we want to change
+    
+    # colour 
+    theme(
+    
+      #text elements
+      plot.title = element_text(             #title
+                   family = font,            #set font family
+                   size = 20,                #set font size
+                   face = 'bold',            #bold typeface
+                   hjust = 0,                #left align
+                   vjust = 2),               #raise slightly
+
+      plot.subtitle = element_text(          #subtitle
+                   family = font,            #font family
+                   size = 12),                #font size
+      
+      plot.caption = element_text(           #caption
+                   family = font,            #font family
+                   size = 9,                 #font size
+                   hjust = 1),               #right align
+
+                  
+      legend.title = element_text(           #caption
+                   family = font,            #font family
+                   size = 12),               #font size
+            
+      legend.text = element_text(           #caption
+                   family = font,           #font family
+                   size = 12),              #font size
+      
+      axis.title = element_text(             #axis titles
+                   family = font,            #font family
+                   size = 14),               #font size
+
+      axis.text = element_text(              #axis text
+                   family = font,            #axis famuly
+                   size = 12),               #font size
+
+      axis.text.x = element_text(            #margin for axis text
+                    margin=margin(5, b = 10)),
+      
+      
+      #since the legend often requires manual tweaking 
+      #based on plot content, don't define it here
+      
+      #  facetting options
+      strip.background = element_rect(color = "black"),  
+      strip.text.x = element_text(size = 12),  
+      strip.text.y = element_text(size = 12)
+      )
+    }
+```
+
+## Soil Data
+
+```{r directory, include = F}
+soil_csv <- read_csv(here("data/soil/soil-data-final.csv"))
+```
+
+```{r data transformations}
+# invaded status as factor
+soil_csv$invaded_status <- as.factor(soil_csv$invaded_status)
+
+# sample ID
+soil_df <- soil_csv %>%
+  remove_rownames %>%
+  column_to_rownames(var = "sample_id") %>% 
+  dplyr::select(-site_number, -site_ab)
+
+# long format
+soil_long <- soil_csv %>% 
+  gather(analyses, measurement, P:N, avg_pH) %>% 
+  dplyr::select(-pH1, -pH2, -pH3)
+# View(soil_long)
+
+# wide format
+soil_wide <- soil_long %>% 
+  spread(analyses, measurement) %>% 
+  remove_rownames %>%
+  column_to_rownames(var = "sample_id") %>% 
+  dplyr::select(-site_ab)
+# View(soil_wide)
+```
+
+```{r data frames}
+# data frame with soil chemical analyses data and invasion status
+soil_data <- soil_wide[c(1:3, 8:11)]
+
+# data frame with only soil chemical analyses data
+soilchem_data <- soil_wide[c(8:11)]
+```
+
+## Growth Data
+Wide format has all of the NAs removed
+
+```{r df, include = FALSE}
+# generation 1
+growth_data_gen1 <- read_csv(here("data/growth/growth1.csv"))
+
+df1_growth_long <- growth_data_gen1 %>%
+  dplyr::select(ID:growth, above, below, biomass) %>%
+  gather(day, height, week0:week5) 
+
+df1_growth_long$height <- as.numeric(df1_growth_long$height)
+df1_growth_long$day <- as.factor(df1_growth_long$day)
+df1_growth_long$above <- as.numeric(df1_growth_long$above)
+df1_growth_long$below  <- as.numeric(df1_growth_long$below)
+df1_growth_long$biomass  <- as.numeric(df1_growth_long$biomass)
+
+df1_growth_wide <- df1_growth_long %>%
+  filter(!is.na(above) & !is.na(below) & !is.na(biomass)) %>% 
+  filter(growth > 0) %>% 
+  mutate(above = above * 1000) %>% 
+  mutate(below = below * 1000) %>% 
+  mutate(biomass = biomass * 1000) %>% 
+  dplyr::select(ID:growth, day, above, below, biomass, height) %>% 
+  spread(day, height)
+
+
+# generation 2
+growth_data_gen2 <- read_csv(here("data/growth/growth2.csv"))
+
+df2_growth_long <- growth_data_gen2 %>%
+  dplyr::select(ID:growth, above, below, biomass) %>% 
+  gather(day, height, week0:week5) 
+
+df2_growth_long$height <- as.numeric(df2_growth_long$height)
+df2_growth_long$day <- as.factor(df2_growth_long$day)
+df2_growth_long$above <- as.numeric(df2_growth_long$above)
+df2_growth_long$below  <- as.numeric(df2_growth_long$below)
+df2_growth_long$biomass  <- as.numeric(df2_growth_long$biomass)
+
+df2_growth_wide <- df2_growth_long %>%
+  filter(growth > 0) %>% 
+  filter(!is.na(above) & !is.na(below) & !is.na(biomass) & !is.na(growth)) %>% 
+  mutate(above = above * 1000) %>% 
+  mutate(below = below * 1000) %>% 
+  mutate(biomass = biomass * 1000) %>% 
+  dplyr::select(ID:growth, day, above, below, biomass, height) %>% 
+  spread(day, height)
+
+
+
+# generation 3
+growth_data_gen3 <- read_csv(here("data/growth/growth3.csv"))
+
+df3_growth_long <- growth_data_gen3 %>%
+  dplyr::select(ID:growth, above, below, biomass) %>% 
+  gather(day, height, week0:week5) 
+
+df3_growth_long$height <- as.numeric(df3_growth_long$height)
+df3_growth_long$day <- as.factor(df3_growth_long$day)
+df3_growth_long$above <- as.numeric(df3_growth_long$above)
+df3_growth_long$below  <- as.numeric(df3_growth_long$below)
+df3_growth_long$biomass  <- as.numeric(df3_growth_long$biomass)
+
+df3_growth_wide <- df3_growth_long %>%
+  filter(growth > 0) %>% 
+  filter(!is.na(above) & !is.na(below) & !is.na(biomass) & !is.na(growth)) %>% 
+  mutate(above = above * 1000) %>% 
+  mutate(below = below * 1000) %>% 
+  mutate(biomass = biomass * 1000) %>% 
+  dplyr::select(ID:growth, day, above, below, biomass, height) %>% 
+  spread(day, height)
+
+```
+
+# Map
+
+## Churchill
+
+```{r location of Churchill}
+countries <- c("Canada", "USA")
+noram <- map_data("world", region = countries) 
+
+noram <- noram %>%
+  group_by(region) %>% 
+  filter(30 < lat & lat < 80) %>% 
+  filter(-110 < long, long < -90) %>% 
+  summarize(lat = min(lat)+5, long = mean(long))
+noram
+
+# Churchill 
+churchill <- data.frame(longitude = -94.1650, latitude = 58.7684)
+
+# Toronto
+toronto <- data.frame(longitude = -79.347015, latitude = 43.651070)
+```
+
+## Sites
+
+```{r}
+# soil lat & long
+# unique soil sites
+soil_sites <- soil_csv %>% 
+  dplyr::select(sample_id, site_number, site_ab,
+                invaded_status, latitude, longitude) %>% 
+  filter(invaded_status == "invaded")
+```
+
+## Map
+
+
+```{r canada map}
+inset_canada_map <- map_data("world", region = "canada") %>% 
+  ggplot() +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               fill = "white", colour = "black") +
+  geom_star(data = churchill,
+            aes(x = longitude , y = latitude),
+            size = 3,
+            fill = "black") +
+  geom_star(data = toronto,
+            aes(x = longitude , y = latitude),
+            size = 3,
+            fill = "grey") +
+  theme(line = element_blank(),
+        axis.title = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA),
+        plot.background = element_blank())
+
+inset_canada_map
+```
+
+
+```{r ggmap soil sampling sites}
+map_churchill <- get_map(location = "Churchill, MB, Canada",
+                         zoom = 10,
+                         maptype = "watercolor",
+                         source = "stamen",
+                         color = "bw", force = TRUE)
+```
+
+
+```{r ggmap soil sampling sites}
+main_churchill_map <- ggmap(map_churchill) +
+  geom_label_repel(data = soil_sites,
+            aes(x = longitude, y = latitude,
+                label = site_number),
+            size = 4,
+            max.overlaps = Inf) +
+  scalebar(location = "bottomright",
+           x.min = -95, x.max = -93.8,
+           y.min = 58.6, y.max = 58.8,
+           dist = 10, dist_unit = "km",
+           transform = TRUE, model = 'WGS84',
+           st.dist = 0.05, st.size = 3) +
+  labs(y = "Longitude", x = "Latitude") +
+  theme(panel.border = element_rect(colour = "black", fill=NA))
+
+main_churchill_map
+```
+
+```{r inset and main}
+final_map <- main_churchill_map +
+  inset(ggplotGrob(inset_canada_map),
+        xmin = -94.2, xmax = -93.72482,
+        ymin = 58.83, ymax = 59)
+final_map
+```
+
+
+# Soil 
+
+## Summaries
+```{r}
+# mean, avg, sd by invaded/uninvaded
+soil_sum_inv <- soil_long %>% 
+  group_by(analyses, invaded_status) %>% 
+  dplyr::summarise(
+    count = n(),
+    mean = mean(measurement, na.rm = TRUE),
+    median = median(measurement, na.rm = TRUE),
+    IQR = IQR(measurement, na.rm = TRUE),
+    sd = sd(measurement, na.rm = TRUE),
+    se = sd / sqrt(count), na.rm = TRUE
+  )
+soil_sum_inv
+
+## interval plot
+fig_soil_sum_inv_intervalplot <- soil_sum_inv %>%
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + se,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  scale_colour_brewer(palette = "Set1") +
+  # theme_vz() +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Measurement")
+
+fig_soil_sum_inv_intervalplot
+```
+
+
+## Analyses
+
+### C
+
+```{r C by invaded_status}
+wilcox_test(C ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+```
+
+
+```{r C t-test and boxplots}
+# test, add p-value and significance levels
+Cstat_test <- soil_wide %>% 
+  wilcox_test(C ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+Cstat_test
+
+# boxplot with sig levels 
+soil_inv_Cttest <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = C)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  # scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Cstat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(Cstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "C (% dry)") 
+
+soil_inv_Cttest
+```
+
+
+### N
+
+```{r N by invaded_status}
+wilcox_test(N ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+```
+
+
+```{r N t-test and boxplots}
+# test, add p-value and significance levels
+Nstat_test <- soil_wide %>% 
+  wilcox_test(N ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+Nstat_test
+
+# boxplot with sig levels
+soil_inv_Nttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = N)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(Nstat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(Nstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "N (% dry)") 
+soil_inv_Nttest
+
+# boxplot with sig levels dark
+soil_inv_Nttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = N,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Nstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(Nstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "N (% dry)")
+# 
+# soil_inv_Nttest_dark <- soil_inv_Nttest_dark + theme_darkclassic() +
+#   theme(legend.position = "none")
+
+soil_inv_Nttest_dark
+```
+
+### P
+
+```{r P by invaded_status}
+wilcox_test(P ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+```
+
+```{r P t-test and boxplots}
+# test, add p-value aPd sigPificaPce levels
+Pstat_test <- soil_wide %>% 
+  wilcox_test(P ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+Pstat_test
+
+# boxplot with sig levels
+soil_inv_Pttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = P)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(Pstat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(Pstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "P (mg/kg)")
+soil_inv_Pttest
+
+# boxplot with sig levels dark
+soil_inv_Pttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = P,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Pstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(Pstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "P (% dry)") +
+  # theme_darkclassic() +
+  theme(legend.position = "none")
+
+soil_inv_Pttest_dark
+```
+
+### pH
+
+```{r pH by invaded_status}
+wilcox_test(avg_pH ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+```
+
+```{r}
+# test, add p-value and significance levels
+pHstat_test <- soil_wide %>% 
+  wilcox_test(avg_pH ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+pHstat_test
+
+# boxplot with sig levels
+soil_inv_pHttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = avg_pH)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(pHstat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(pHstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "Average pH")
+soil_inv_pHttest
+```
+
+### All
+```{r}
+fig_soil_ttest_inv <- soil_inv_Cttest + soil_inv_Nttest + soil_inv_Pttest + soil_inv_pHttest
+
+fig_soil_ttest_inv
+```
+
+## PCA
+
+```{r}
+soil_pca <- soilchem_data %>% 
+  filter(!is.na(avg_pH)) %>% 
+  prcomp(scale = T, center = T) # Pipe directly into base R function for PCA
+
+# soil_princomp <- princomp(soil_data, cor = TRUE)
+summary(soil_pca)
+
+str(soil_pca)
+```
+
+```{r}
+soil_pca$rotation
+soil_pca$x
+```
+
+```{r autoplot coloured by invasion}
+soil_pca_values <- data.frame(invaded_status = soil_wide$invaded_status, soil_pca$x)
+soil_pca_loadings <- data.frame(soil_var = rownames(soil_pca$rotation), soil_pca$rotation)
+
+fig_soil_pca <- autoplot(soil_pca,
+         loadings = TRUE, loadings.label = FALSE, loadings.colour = "black",
+         # label = TRUE,
+         size = 2,
+         data = soil_data,
+         shape = "invaded_status",) +
+  scale_shape_discrete(palette = "Set1", "Invasion status") +
+  annotate("text",
+           x = soil_pca_loadings$PC1*0.70, y = soil_pca_loadings$PC2*0.65,
+           label = c("pH", "Carbon", "Nitrogen", "Phosphorous"),
+           size = 5)
+
+fig_soil_pca
+```
+
+
+## Non-metric Dimensional Scaling
+
+```{r nmds 1 euclidean}
+set.seed(1)
+soil_nmds1 <- metaMDS(soilchem_data, dist = "eu", k = 2, trymax = 100)
+soil_nmds1
+stressplot(soil_nmds1)
+```
+
+```{r nmds1 scores}
+nmds1_scores <- as.data.frame(scores(soil_nmds1, display = "sites"))
+nmds1_scores <- cbind(nmds1_scores, inv_status = soil_data$invaded_status)
+nmds1_scores <- cbind(nmds1_scores, location = soil_data$location)
+nmds1_scores <- cbind(nmds1_scores, site = rownames(nmds1_scores))
+
+head(nmds1_scores)
+```
+
+```{r nmds2 hulls}
+nmds1_scores <- na.omit(nmds1_scores) #chull function does not work with missing data
+find_hull <- function(nmds1_scores) nmds1_scores[chull(nmds1_scores$NMDS1, nmds1_scores$NMDS2), ]
+hulls <- plyr::ddply(nmds1_scores, "inv_status", find_hull)
+```
+
+
+
+```{r nmds}
+fig_soil_nmds <- ggplot(data = nmds1_scores, aes(x = NMDS1, y = NMDS2,
+                                shape = factor(inv_status),
+                                colour = factor(inv_status)), size = 2) + 
+  geom_point() +
+  coord_fixed() +
+  theme(panel.background = element_rect(fill = NA, colour = "black",
+                                        size = 1, linetype = "solid")) +
+  scale_colour_brewer(palette = "Set1", "Invasion status") +
+  scale_shape_manual(values = c(1, 4), "Invasion status") +
+  geom_polygon(data = hulls, alpha = 0.30) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        axis.text = element_text(size = 10)) + # add legend at right of plot
+  theme_vz()
+fig_soil_nmds
+```
+
+
+# Growth
+
+## Summaries
+```{r}
+# generation 1
+df1_above_sum <- df1_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(above, na.rm = TRUE),
+    median = median(above, na.rm = TRUE),
+    IQR = IQR(above, na.rm = TRUE),
+    sd = sd(above),
+    se = sd / sqrt(count)
+    )
+
+df1_below_sum <- df1_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(below, na.rm = TRUE),
+    median = median(below, na.rm = TRUE),
+    IQR = IQR(below, na.rm = TRUE),
+    sd = sd(below),
+    se = sd / sqrt(count)
+  )
+
+df1_biomass_sum <- df1_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(biomass, na.rm = TRUE),
+    median = median(biomass, na.rm = TRUE),
+    IQR = IQR(biomass, na.rm = TRUE),
+    sd = sd(biomass),
+    se = sd / sqrt(count)
+  )
+
+# generation 2
+df2_above_sum <- df2_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(above, na.rm = TRUE),
+    median = median(above, na.rm = TRUE),
+    IQR = IQR(above, na.rm = TRUE),
+    sd = sd(above),
+    se = sd / sqrt(count)
+    )
+
+df2_below_sum <- df2_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(below, na.rm = TRUE),
+    median = median(below, na.rm = TRUE),
+    IQR = IQR(below, na.rm = TRUE),
+    sd = sd(below),
+    se = sd / sqrt(count)
+  )
+
+df2_biomass_sum <- df2_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(biomass, na.rm = TRUE),
+    median = median(biomass, na.rm = TRUE),
+    IQR = IQR(biomass, na.rm = TRUE),
+    sd = sd(biomass),
+    se = sd / sqrt(count)
+  )
+ 
+# generation 3
+df3_above_sum <- df3_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(above, na.rm = TRUE),
+    median = median(above, na.rm = TRUE),
+    IQR = IQR(above, na.rm = TRUE),
+    sd = sd(above),
+    se = sd / sqrt(count)
+    )
+
+df3_below_sum <- df3_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(below, na.rm = TRUE),
+    median = median(below, na.rm = TRUE),
+    IQR = IQR(below, na.rm = TRUE),
+    sd = sd(below),
+    se = sd / sqrt(count)
+  )
+
+df3_biomass_sum <- df3_growth_wide %>% 
+  group_by(sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(biomass, na.rm = TRUE),
+    median = median(biomass, na.rm = TRUE),
+    IQR = IQR(biomass, na.rm = TRUE),
+    sd = sd(biomass),
+    se = sd / sqrt(count)
+  )
+```
+
+
+
+## Generation 1
+
+The two tables below includes the main summary statistics for aboveground and belowground biomass of *L. vulgaris* in generation one.
+
+```{r generation 1 aboveground biomass summary}
+rmarkdown::paged_table(df1_above_sum)
+```
+
+```{r generation 1 belowground biomass summary}
+rmarkdown::paged_table(df1_below_sum)
+```
+
+```{r generation 1 total biomass summary}
+rmarkdown::paged_table(df1_biomass_sum)
+```
+
+```{r generation 1 intervalplot}
+fig1_above_biomass <- df1_above_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.1) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Aboveground Biomass (mg)",
+       # title = "Total above-ground biomass"
+       )
+
+fig1_below_biomass <- df1_below_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.1) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Belowground Biomass (mg)",
+       # title = "Total below-ground biomass"
+       )
+
+fig1_biomass_intervalplot <- fig1_above_biomass / fig1_below_biomass
+
+fig1_biomass_intervalplot
+```
+
+Interval plots (mean indicated by the point, standard errors indicated by the error bars) show that there is lower biomass in live, invaded soils compared to other three treatments. It's possible that differences in invaded & uninvaded sterile soils may be attributable to physical properties of the soil, although we tried to limit abiotic effects by using a specific percentage (4%) of inocula. All treatments of soil may have different abiotic properties, but this should have very little effect on plant growth and soil feedbacks.
+
+```{r generation 1 above & below interaction plot}
+fig1_above_interaction <- ggplot(df1_growth_wide, aes(x = sterile_status, y = above, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Aboveground biomass (mg) in generation 1")
+
+fig1_below_interaction <- ggplot(df1_growth_wide, aes(x = sterile_status, y = below, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Belowground biomass (mg) in generation 1")
+
+fig1_above_interaction
+fig1_below_interaction
+```
+
+```{r generation 1 all interaction plot}
+fig1_biomass_interaction <- df1_growth_wide %>%
+  ggplot(aes(x = sterile_status,
+             y = biomass,
+             colour = invaded_status)) +
+  geom_jitter(width = 0.2) +
+  stat_summary(fun = mean, aes(group = invaded_status),
+               geom = "line") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Total biomass (mg) in generation 1",
+       colour = "Invaded Status") +
+  # theme_vz() +
+  theme(legend.position = "right")
+
+
+fig1_biomass_interaction <- fig1_biomass_interaction +
+  annotate("text", x = "live", y = 500,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 46): 157.2141") +
+  annotate("text", x = "live", y = 550,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 46): 130.8543") +
+  annotate("text", x = "sterile", y = 500,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 48): 163.9771") +
+  annotate("text", x = "sterile", y = 550,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 45): 139.4256")
+
+fig1_biomass_interaction
+```
+
+
+
+### ANOVA and LM 
+
+I ran an ANOVA to analyse the differences in average aboveground biomass between treatment groups, using `invaded_status`, `sterile_status`, and their interaction as the predictor variables.
+
+```{r}
+abovebiomass_aov <- aov(above ~ invaded_status * sterile_status, # no random effects
+                        data = df1_growth_wide)
+abovebiomass_Anova <- Anova(abovebiomass_aov, type = "II")
+abovebiomass_Anova
+```
+
+There were no significant predictors: neither `invaded_status`, `sterile_status`, or their interaction had a significant effect on aboveground biomass.
+
+Similarly, I ran an ANOVA to analyse the differences in average belowground biomass between treatment groups, using `invaded_status`, `sterile_status`, and their interaction as the predictor variables.
+
+```{r ANOVA below biomass gen1}
+belowbiomass_aov <- lm(below ~ invaded_status * sterile_status, data = df1_growth_wide)
+belowbiomass_Anova <- Anova(belowbiomass_aov, type = "2")
+belowbiomass_Anova
+```
+
+Again, there were no significant predictors.
+
+Below, I calculate eta squared (η2), a measure of effect size for the ANOVA. The variable `invaded_status` had the greatest effect for aboveground and belowground biomass, but this effect size is still too small to have a significant effect.
+
+η2 for aboveground biomass
+```{r etasquared above biomass gen1}
+etaSquared(abovebiomass_aov, type = 2)
+```
+
+η2 for belowground biomass
+```{r etasquared below biomass gen1}
+etaSquared(belowbiomass_aov, type = 2)
+```
+
+
+Below is a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects. There were no significant predictors of aboveground biomass.
+
+```{r}
+model <- lm(above ~ invaded_status * sterile_status,
+                    data = df1_growth_wide) # interested in fixed effects
+
+summary(model)
+# tab_model(model, show.df = TRUE)
+```
+
+For belowground biomass, I first used a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects. There were no significant predictors of belowground biomass.
+
+```{r}
+model <- lm(below ~ invaded_status * sterile_status,
+                    data = df1_growth_wide)
+
+summary(model)
+# tab_model(model, show.df = TRUE)
+```
+
+I also combined aboveground and belowground biomass into just a `biomass` column, and ran a linear model with `invaded_status`,  `sterile_status`, and their interaction as predictors. Again, none were significant.
+
+```{r}
+# no random effects
+fixed_model_1 <- lm(biomass ~ invaded_status * sterile_status +
+                      week0,
+                    data = df1_growth_wide, REML = FALSE)
+
+fixed_model_2 <- lm(biomass ~ invaded_status * sterile_status,
+                    data = df1_growth_wide, REML = FALSE)
+
+
+
+summary(fixed_model_1)
+Anova(fixed_model_1, p.adjust.method = TRUE) # type?
+# tab_model(fixed_model_1, show.df = TRUE)
+```
+```{r}
+# assumptions
+par(mfrow = c(2,2))
+plot(fixed_model_1)
+```
+
+```{r}
+par(mfrow = c(2,2))
+plot(model)
+```
+
+### Random Effects 
+
+```{r model selection gen1}
+# saturated models with different random effects
+mixed_model_1 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|site_number),
+                    data = df1_growth_wide, REML = TRUE, na.action = "na.fail")
+
+mixed_model_2 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|location/site_number),
+                    data = df1_growth_wide, REML = TRUE, na.action = "na.fail")
+
+mixed_model_3 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1 + invaded_status|site_number),
+                    data = df1_growth_wide, REML = TRUE)
+
+AICc(mixed_model_1, mixed_model_2, mixed_model_3) # 2 is better
+
+
+# dredge to find fixed effects
+dredge(mixed_model_1, rank = AICc)
+
+
+# compare fixed & mixed models
+AICc(fixed_model_1, fixed_model_2, mixed_model_1, mixed_model_2, mixed_model_3)
+```
+
+The best fixed effects model is the one with initial height as a fixed variable and site must be nested within location as random variables. However, the model without location nesting is also a well-performing model (AICc<2).
+
+```{r}
+summary(mixed_model_1)
+summary(update(mixed_model_1))
+
+tidy(mixed_model_1)
+# try `augment` or `glance`
+
+Anova(mixed_model_1, p.adjust.method = TRUE, type = "3")
+```
+
+```{r}
+df1_growth_wide$fit_slope <- predict(fixed_model_1)
+
+ggplot(df1_growth_wide, aes(x = invaded_status,
+                            y = fit_slope,
+                            colour = sterile_status)) +
+  # geom_abline(aes(intercept = 97.677, slope = -4.756), size = 2) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = sterile_status), geom = "line")
+```
+None of the fixed effects were significant predictors of biomass in generation one.
+
+
+Looking at the mixed model as well.
+```{r}
+summary(mixed_model_1)
+summary(update(mixed_model_1))
+
+tidy(mixed_model_1)
+# try `augment` or `glance`
+
+Anova(mixed_model_1, p.adjust.method = TRUE, type = "3")
+```
+
+```{r}
+df1_growth_wide$fit_slope <- predict(mixed_model_1)
+
+ggplot(df1_growth_wide, aes(x = invaded_status,
+                            y = fit_slope,
+                            colour = sterile_status)) +
+  # geom_abline(aes(intercept = 97.677, slope = -4.756), size = 2) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = sterile_status), geom = "line")
+```
+
+
+## Generation 2
+
+The two tables below includes the main summary statistics for aboveground and belowground biomass of *L. vulgaris* in generation one. Generation 2 had the greatest mortality, especially in the earlier weeks, and individual plants were significantly smaller. I believe that there were several reasons for this. First, it's possible that the second generation of plants are beginning to experience negative plant-soil feedbacks. However, during this period of the experiment, plants were undergoing greater stress in the greenhouse. Due to the transitional weather period in springtime, greenhouse temperatures were difficult to control, and several instances of greenhouse overheating above the set temperature of 18°C occurred. As well, I had to move the plants, within their conetainers, to another room for a brief period of time due to greenhouse maintenance. Although none of this may significantly affect the individual plants, the combination of changes and temperature stressors may have had a slight impact on mortality and growth. In particular, I noticed that many seedlings did not survive past week 2.
+
+```{r generation 2 aboveground biomass summary}
+rmarkdown::paged_table(df2_above_sum)
+```
+
+```{r generation 2 belowground biomass summary}
+rmarkdown::paged_table(df2_below_sum)
+```
+
+```{r generation 2 total biomass summary}
+rmarkdown::paged_table(df2_biomass_sum)
+```
+
+```{r generation 2 intervalplot}
+fig2_above_biomass <- df2_above_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.2) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Aboveground Biomass (mg)",
+       # title = "Total above-ground biomass"
+       )
+
+fig2_below_biomass <- df2_below_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.2) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Belowground Biomass (mg)",
+       # title = "Total below-ground biomass"
+       )
+
+fig2_biomass_intervalplot <- fig2_above_biomass / fig2_below_biomass
+
+
+fig2_biomass_intervalplot
+```
+
+Interval plots (mean indicated by the point, standard errors indicated by the error bars) show that there is lower biomass in live, uninvaded soils compared to other three treatments.
+
+```{r generation 2 above & below interaction plot}
+fig2_above_interaction <- ggplot(df2_growth_wide, aes(x = sterile_status, y = above, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  # theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Aboveground biomass (mg) in generation 2")
+
+fig2_below_interaction <- ggplot(df2_growth_wide, aes(x = sterile_status, y = below, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  # theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Belowground biomass (mg) in generation 2")
+
+fig2_above_interaction
+fig2_below_interaction
+```
+
+```{r generation 2 all interaction plot}
+fig2_biomass_interaction <- df2_growth_wide %>%
+  filter(!is.na(above) | !is.na(below) | !is.na(biomass)) %>% 
+  ggplot(aes(x = sterile_status,
+             y = biomass,
+             colour = invaded_status)) +
+  geom_jitter(width = 0.2) +
+  stat_summary(fun = mean, aes(group = invaded_status),
+               geom = "line") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Total biomass (mg) in generation 2",
+       colour = "Invaded Status") +
+  # theme_vz() +
+  theme(legend.position = "right")
+
+
+fig2_biomass_interaction <- fig2_biomass_interaction +
+  annotate("text", x = "live", y = 290,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 41): 58.90375") +
+  annotate("text", x = "live", y = 330,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 39): 56.59359") +
+  annotate("text", x = "sterile", y = 320,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 44): 76.39070") +
+  annotate("text", x = "sterile", y = 350,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 42): 65.83537")
+
+fig2_biomass_interaction
+```
+
+
+
+
+### ANOVA and LM 
+
+I ran an ANOVA to analyse the differences in average aboveground biomass between treatment groups, using `invaded_status`, `sterile_status`, and their interaction as the predictor variables.
+
+ANOVA of predictors on aboveground biomass:
+```{r}
+abovebiomass_aov <- aov(above ~ invaded_status * sterile_status,
+                        data = df2_growth_wide)
+abovebiomass_Anova <- Anova(abovebiomass_aov, type = "II")
+abovebiomass_Anova
+```
+
+
+ANOVA of predictors on belowground biomass:
+```{r ANOVA below biomass gen2}
+belowbiomass_Anova <- aov(below ~ invaded_status * sterile_status,
+                        data = df2_growth_wide)
+belowbiomass_Anova <- Anova(belowbiomass_aov, type = "2")
+belowbiomass_Anova
+```
+
+
+There were no significant predictors: neither `invaded_status`, `sterile_status`, or their interaction had a significant effect on aboveground or belowground biomass.
+
+The eta squared (η2) again showed that the variable `invaded_status` had the greatest effect for aboveground and belowground biomass, but this effect size is still too small to have a significant effect.
+
+η2 for aboveground biomass
+```{r etasquared above biomass gen2}
+etaSquared(abovebiomass_aov, type = 2)
+```
+
+η2 for belowground biomass
+```{r etasquared below biomass gen2}
+etaSquared(belowbiomass_aov, type = 2)
+```
+
+
+Finally, I created a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects. There were no significant predictors of aboveground biomass.
+
+```{r}
+model <- lm(above ~ invaded_status * sterile_status,
+                    data = df2_growth_wide) # interested in fixed effects
+
+summary(model)
+Anova(model, p.adjust.method = TRUE)
+# tab_model(model, show.df = TRUE)
+```
+
+For belowground biomass, I first used a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects. There were no significant predictors of belowground biomass.
+
+```{r}
+model <- lm(below ~ invaded_status * sterile_status,
+                    data = df2_growth_wide)
+
+summary(model)
+Anova(model, p.adjust.method = TRUE)
+# tab_model(model, show.df = TRUE)
+```
+
+
+I combined aboveground and belowground biomass into just a `biomass` column, and ran a linear model with `invaded_status`,  `sterile_status`, and their interaction as predictors.
+
+```{r}
+# no random effects
+fixed_model_1 <- lm(biomass ~ invaded_status * sterile_status +
+                      week0,
+                    data = df2_growth_wide, REML = FALSE)
+
+fixed_model_2 <- lm(biomass ~ invaded_status * sterile_status,
+                    data = df2_growth_wide, REML = FALSE)
+
+
+summary(fixed_model_1)
+Anova(fixed_model_1, p.adjust.method = TRUE)
+# tab_model(fixed_model_1, show.df = TRUE)
+```
+
+No predictors were significant in these linear models.
+
+```{r}
+par(mfrow = c(2,2))
+plot(model)
+```
+
+
+### Random Effects 
+
+```{r model selection gen2}
+# saturated models with different random effects
+mixed_model_1 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|site_number),
+                    data = df2_growth_wide, REML = TRUE, na.action = "na.fail")
+
+mixed_model_2 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|location/site_number),
+                    data = df2_growth_wide, REML = TRUE)
+
+mixed_model_3 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1 + invaded_status|site_number),
+                    data = df2_growth_wide, REML = TRUE)
+
+AICc(mixed_model_1, mixed_model_2, mixed_model_3) # 1 is better
+
+
+# dredge to find fixed effects
+dredge(mixed_model_1, rank = AICc)
+```
+
+The best model is the one with all fixed variables including initial height and site as a random factor.
+
+```{r}
+summary(mixed_model_1)
+summary(update(mixed_model_1))
+
+tidy(mixed_model_1)
+# try `augment` or `glance`
+
+Anova(mixed_model_1, p.adjust.method = TRUE, type = "3")
+```
+
+
+These results show that aboveground and belowground biomass were not significantly affected by either invasion or sterility.
+
+```{r gen 2 model assumptions}
+par(mfrow = c(2,2))
+plot(fixed_model_1)
+```
+
+## Generation 3
+
+The two tables below includes the main summary statistics for aboveground and belowground biomass of *L. vulgaris* in generation one.
+
+```{r generation 3 aboveground biomass summary}
+rmarkdown::paged_table(df3_above_sum)
+```
+
+```{r generation 3 belowground biomass summary}
+rmarkdown::paged_table(df3_below_sum)
+```
+
+```{r generation 3 total biomass summary}
+rmarkdown::paged_table(df3_biomass_sum)
+```
+
+```{r generation 3 intervalplot}
+fig3_above_biomass <- df3_above_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.3) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set3") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Aboveground Biomass (mg)",
+       # title = "Total above-ground biomass"
+       )
+
+fig3_below_biomass <- df3_below_sum %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width  = 0.3) +
+  facet_grid(~ sterile_status) + 
+  # expand_limits(y = 0) + 
+  # theme_vz() +
+  scale_fill_brewer(palette = "Set3") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Belowground Biomass (mg)",
+       # title = "Total below-ground biomass"
+       )
+
+fig3_biomass_intervalplot <- fig3_above_biomass / fig3_below_biomass
+
+fig3_biomass_intervalplot
+```
+
+Interval plots show that there is lower biomass in live, invaded soils compared to other three treatments. The standard error bars overlap much less in the third generation.
+
+```{r generation 3 above & below interaction plot}
+fig3_above_interaction <- ggplot(df3_growth_wide, aes(x = sterile_status, y = above, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  # theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Aboveground biomass (mg) in generation 3")
+
+fig3_below_interaction <- ggplot(df3_growth_wide, aes(x = sterile_status, y = below, colour = invaded_status)) +
+  geom_point() +
+  stat_summary(fun = mean, aes(group = invaded_status), geom = "line") +
+  # theme_vz() +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Belowground biomass (mg) in generation 3")
+
+fig3_above_interaction
+fig3_below_interaction
+```
+
+```{r generation 3 all interation plot}
+fig3_biomass_interaction <- df3_growth_wide %>%
+  filter(!is.na(above) | !is.na(below) | !is.na(biomass)) %>% 
+  ggplot(aes(x = sterile_status,
+             y = biomass,
+             colour = invaded_status)) +
+  geom_jitter(width = 0.2) +
+  stat_summary(fun = mean, aes(group = invaded_status),
+               geom = "line") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = "Sterile Status", y = "Total biomass (mg) in generation 3",
+       colour = "Invaded Status") +
+  # theme_vz() +
+  theme(legend.position = "right")
+
+
+fig3_biomass_interaction <- fig3_biomass_interaction +
+  annotate("text", x = "live", y = 320,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 46): 108.07189") +
+  annotate("text", x = "live", y = 350,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 53): 81.41529") +
+  annotate("text", x = "sterile", y = 420,
+           parse = TRUE, colour = "#377EB8", # blue
+           label = "'mean ' (italic(N) == 45): 92.85111") +
+  annotate("text", x = "sterile", y = 450,
+           parse = TRUE, colour = "#E41A1C", # red
+           label = "'mean ' (italic(N) == 49): 120.62551")
+
+fig3_biomass_interaction
+```
+
+
+### ANOVA and LM 
+
+I ran an ANOVA to analyse the differences in average aboveground biomass between treatment groups, using `invaded_status`, `sterile_status`, and their interaction as the predictor variables.
+
+```{r}
+abovebiomass_aov <- aov(above ~ invaded_status * sterile_status, # no random effects
+                        data = df3_growth_wide)
+abovebiomass_Anova <- Anova(abovebiomass_aov, type = "II")
+abovebiomass_Anova
+```
+
+Similarly, I ran an ANOVA to analyse the differences in average belowground biomass between treatment groups, using `invaded_status`, `sterile_status`, and their interaction as the predictor variables.
+
+```{r ANOVA below biomass gen3}
+belowbiomass_aov <- lm(below ~ invaded_status * sterile_status, data = df3_growth_wide)
+belowbiomass_Anova <- Anova(belowbiomass_aov, type = "2")
+belowbiomass_Anova
+```
+
+The interaction term between `invaded_status` and `sterile_status` was a significant predictor of aboveground biomass, and both `sterile_status` and the interaction were a sigbnificant predictor of belowground biomass. Thus, in generation 3, I can reject the null hypothesis that there are no significant differences between treatment groups.
+
+
+Below is a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects for aboveground biomass.
+
+```{r}
+model <- lm(above ~ invaded_status * sterile_status,
+                    data = df3_growth_wide)
+
+summary(model)
+Anova(model, p.adjust.method = TRUE)
+# tab_model(model, show.df = TRUE)
+```
+
+For belowground biomass, I first used a linear model with `invaded_status`, `sterile_status`, and their interaction as fixed effects. There were no significant predictors of belowground biomass.
+
+```{r}
+model <- lm(below ~ invaded_status * sterile_status,
+                    data = df3_growth_wide)
+
+summary(model)
+Anova(model, p.adjust.method = TRUE)
+# tab_model(model, show.df = TRUE)
+```
+
+I also combined aboveground and belowground biomass into just a `biomass` column, and ran a linear model with `invaded_status`,  `sterile_status`, and their interaction as predictors. Again, none were significant.
+
+```{r}
+# no random effects
+fixed_model_1 <- lm(biomass ~ invaded_status * sterile_status +
+                      week0,
+                    data = df3_growth_wide, REML = FALSE)
+
+fixed_model_2 <- lm(biomass ~ invaded_status * sterile_status,
+                    data = df3_growth_wide, REML = FALSE)
+
+
+# summary(model)
+Anova(fixed_model_1, p.adjust.method = TRUE, type = "3")
+# tab_model(model, show.df = TRUE)
+
+summary(fixed_model_1)
+summary(update(fixed_model_1))
+
+tidy(fixed_model_1)
+# try `augment` or `glance`
+```
+
+
+```{r}
+par(mfrow = c(2,2))
+plot(fixed_model_1)
+```
+
+
+The models indicates that `sterile_status` was a significant predictor (plants that were grown in sterile soils had greater biomass than plants in live soil), and `invaded_status` was a marginally significant predictor for aboveground biomass (plants in uninvaded soils had greater aboveground biomass than plants in invaded soil).
+
+Sterility was a significant predictor of biomass, in which sterile soils resulted in greater biomass. The initial sterilization removed any soil biota that may limit *Linaria* growth. Thus, throughout the two previous generations, individuals were modifying the soil to their benefit in sterile soil, and this inocula resulted in increased growth.
+
+In the `invaded_status` treatment, half of these soils were sterilized prior to Generation 1. However, it appears that the effect of invasion was beginning to swamp out the effect of the initial sterilization. This was not expected, as we hypothesized that individuals in uninvaded sites would be smaller, as they are limited by the soil biota. In actuality, larger individuals resulted from soil inocula that were originally collected from uninvaded sites. This may be because previous generations have modified the uninvaded live and sterile soil. This result may be mostly attributed to the fact that biomass was visibly reduced in live, invaded soils, and, in comparison, both sterile treatments resulted in a higher biomass.
+
+**net effect - less pathogens, more mutalists?**
+
+Furthermore, the interaction between `sterile_status` and `invaded_status` was a significant predictor of biomass: uninvaded, sterile soils resulted in reduced biomass. This appears to be further evidence of negative plant-soil feedback. *Linaria* negatively alter the soil that reduces growth of future generations, even in sterile soil originally collected from uninvaded sites. It's possible that the uninvaded soils were originally unsuitable for *Linaria*, but after sterilization, it is assumed that any pathogens in the soil would be removed.
+
+be cautious of interpretation
+
+- low r2
+- difficult to use this to explain distribution of *Linaria* - it is just a factor
+- have not answered the question yet - PSF is one contributor
+- feedback can be removed from list as a primary factor
+
+### Random Effects 
+
+```{r model selection gen3}
+# saturated models with different random effects
+mixed_model_1 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|site_number),
+                    data = df3_growth_wide, REML = TRUE, na.action = "na.fail")
+
+mixed_model_2 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1|location/site_number),
+                    data = df3_growth_wide, REML = TRUE)
+
+mixed_model_3 <- lmer(biomass ~ invaded_status * sterile_status +
+                      week0 +
+                      (1 + invaded_status|site_number),
+                    data = df3_growth_wide, REML = TRUE)
+
+AICc(mixed_model_1, mixed_model_2, mixed_model_3) # 1 is better
+
+
+# dredge to find fixed effects
+dredge(mixed_model_1, rank = AICc)
+
+
+# other models without `week0`
+mixed_model_4 <- lmer(biomass ~ invaded_status * sterile_status +
+                      (1|site_number),
+                    data = df3_growth_wide, REML = FALSE)
+
+mixed_model_5 <- lmer(biomass ~ invaded_status * sterile_status +
+                      (1|location/site_number),
+                    data = df3_growth_wide, REML = FALSE)
+
+mixed_model_6 <- lmer(biomass ~ invaded_status * sterile_status +
+                      (1 + invaded_status|site_number),
+                    data = df3_growth_wide, REML = FALSE)
+
+# only `week0`
+mixed_model_7 <- lmer(biomass ~ week0 + (1|site_number),
+                      data = df3_growth_wide, REML = FALSE)
+
+
+AICc(fixed_model_1, fixed_model_2, mixed_model_1, mixed_model_2, mixed_model_3, mixed_model_4, mixed_model_5, mixed_model_6, mixed_model_7)
+```
+
+The best model is the one with all fixed variables including initial height, and site as a random factor.
+
+
+```{r}
+# mixed models
+summary(mixed_model_1)
+summary(update(mixed_model_1))
+
+tidy(mixed_model_1)
+# try `augment` or `glance`
+
+Anova(mixed_model_1, p.adjust.method = TRUE, type = "3")
+```
+
+
+
+
+## All generations
+
+```{r combining data}
+# combining
+df_all_long <- rbind(df1_growth_long, df2_growth_long, df3_growth_long)
+
+# generation as factor
+df_all_long$generation <- as.factor(df_all_long$generation)
+
+# add columns for
+# sterile status & generation and 
+# invaded status & generation
+df_all_long$sterile_generation <- paste(df_all_long$generation,
+                                        df_all_long$sterile_status, 
+                                        sep = "_")
+
+df_all_long$invaded_generation <- paste(df_all_long$generation,
+                                        df_all_long$invaded_status, 
+                                        sep = "_")
+
+df_all_long <- df_all_long %>% 
+  filter(!is.na(biomass) & !is.na(invaded_status))
+```
+
+
+### Summary
+```{r}
+df_biomass_sum <- df_all_long %>% 
+  filter(!is.na(biomass)) %>% 
+  group_by(generation, sterile_status, invaded_status) %>% 
+  summarise(
+    count = n(),
+    mean = mean(biomass*1000, na.rm = TRUE),
+    median = median(biomass*1000, na.rm = TRUE),
+    IQR = IQR(biomass*1000, na.rm = TRUE),
+    sd = sd(biomass*1000),
+    se = sd / sqrt(count)
+  )
+
+df_biomass_sum
+```
+
+
+### Figure
+
+```{r}
+# generation labels
+gen_labs <- c("Generation 1", "Generation 2", "Generation 3")
+names(gen_labs) <- c("1", "2", "3")
+```
+
+```{r all bar one plot}
+sig_label <- data.frame(
+  generation = c(1, 1, 1, 1,
+                 2, 2, 2, 2,
+                 3, 3, 3, 3),
+  invaded_status = c("invaded", "invaded", "uninvaded", "uninvaded",
+                     "invaded", "invaded", "uninvaded", "uninvaded",
+                     "invaded", "invaded", "uninvaded", "uninvaded"),
+  x = c(0.77, 1.22, 1.77, 2.22,
+        0.77, 1.22, 1.77, 2.22,
+        0.77, 1.22, 1.77, 2.22),
+  y = c(160, 185, 170, 192,
+        80, 82, 85, 97,
+        100, 135, 150, 120),
+  label = c("a", "a", "b", "a",
+            "a", "a", "a", "a",
+            "a", "b", "c", "d"))
+
+
+figall_biomass_interaction <- ggplot(df_biomass_sum,
+                                     aes(x = sterile_status,
+                                         y = mean,
+                                         fill = invaded_status,
+                                         shape = invaded_status)) +
+  geom_col(position = position_dodge()) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                position = position_dodge(0.9), width = 0.3) +
+  scale_fill_grey(start = 0.2, end = 0.5) +
+  facet_wrap(~ generation,
+             labeller = labeller(generation = gen_labs)) +
+  labs(x = "Sterile Status",
+       y = "Total biomass (mg)",
+       fill = "Invasion Status") +
+  geom_text(data = sig_label, aes(x, y, label = label)) #+
+  theme(legend.position = "right",
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 12),
+        strip.text = element_text(size = 14)) +
+  theme_classic()
+
+figall_biomass_interaction
+```
+
+
+
+
+
+
+
+
+
+
+
+

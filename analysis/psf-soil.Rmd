@@ -1,0 +1,1468 @@
+---
+title: "PSF - Soil Analyses"
+author: "Vicki M. Zhang"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_notebook
+---
+
+# Setting Up
+
+## Libraries
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = F, message = F, warnings = F)
+
+# install.packages(c("tidyverse", "ggpubr", "ggfortify", "car", cowplot", "googleway", "ggplot2", "ggmap", "ggrepel", "ggspatial", "rgeos", "rgdal", "sf", "rnaturalearth", "rnaturalearthdata", "plotKML"))
+library(here)
+library(tidyverse)
+library(ggstar)
+library(readr)
+library(tibble)
+library(ggpubr)
+library(patchwork)
+library(vegan)
+library(caret)
+library(emmeans)
+library(multcomp)
+library(rstatix)
+library(psych)
+library(cluster)
+library(psych)
+library(ggfortify)
+library(PerformanceAnalytics)
+library(MASS)
+library(MuMIn)
+library(lavaan)
+library(viridis)
+library(car)
+library(cowplot)
+library(XML)
+library(googleway)
+library(ggplot2)
+library(ggmap)
+library(ggsn)
+library(ggrepel)
+library(ggspatial)
+library(rgeos)
+library(rgdal)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(plotKML)
+```
+
+
+## Theme
+
+```{r classic theme}
+theme_classic <- function(){ 
+    font <- "Helvetica"   #assign font family up front
+    
+    theme_classic() %+replace%    #replace elements we want to change
+    
+    # colour 
+    theme(
+      
+      #text elements
+      plot.title = element_text(             #title
+                   family = font,            #set font family
+                   size = 20,                #set font size
+                   face = 'bold',            #bold typeface
+                   hjust = 0,                #left align
+                   vjust = 2,                #raise slightly
+                   colour = "black"),
+      
+      plot.subtitle = element_text(          #subtitle
+                   family = font,            #font family
+                   size = 12,
+                   colour = "black"),               #font size
+      
+      plot.caption = element_text(           #caption
+                   family = font,            #font family
+                   size = 9,                 #font size
+                   hjust = 1,                #right align
+                   colour = "black"),       
+      
+                  
+      legend.title = element_text(           #caption
+                   family = font,            #font family
+                   size = 12,                 #font size
+                   colour = "black"),   
+      
+            
+      legend.text = element_text(           #caption
+                   family = font,            #font family
+                   size = 12,                 #font size
+                   colour = "black"),    
+      
+      axis.title = element_text(             #axis titles
+                   family = font,            #font family
+                   size = 14,                #font size
+                   colour = "black"),
+      
+      axis.text = element_text(              #axis text
+                   family = font,            #axis famuly
+                   size = 12,                 #font size
+                   colour = "black"),
+      
+      axis.text.x = element_text(            #margin for axis text
+                    margin=margin(5, b = 10)),
+      
+      
+      #since the legend often requires manual tweaking 
+      #based on plot content, don't define it here
+      
+      #  facetting options
+      strip.background = element_rect(fill = "white", color = "black"),  
+      strip.text.x = element_text(color = "black",
+                                  size = 14),  
+      strip.text.y = element_text(color = "black", 
+                                  size = 14)
+    )
+}
+```
+
+```{r dark theme}
+theme_darkclassic <- function(){ 
+    font <- "Helvetica"   #assign font family up front
+    
+    theme_classic() %+replace%    #replace elements we want to change
+    
+    # colour 
+    theme(
+      plot.background = element_rect(fill = "grey24"),
+      panel.background = element_rect(fill = "grey24"),
+      panel.border = element_rect(fill = NA, color = "white"),
+    
+
+      #grid elements
+      panel.grid.major = element_blank(),    #strip major gridlines
+      panel.grid.minor = element_blank(),    #strip minor gridlines
+      axis.ticks = element_blank(),          #strip axis ticks
+      axis.line = element_line(colour = "white"),
+      
+      # facet elements
+      strip.background = element_rect(fill = "grey20", colour = "grey20"),
+      strip.text = element_text(colour = "white"),  
+      
+      
+      #text elements
+      plot.title = element_text(             #title
+                   family = font,            #set font family
+                   size = 20,                #set font size
+                   face = 'bold',            #bold typeface
+                   hjust = 0,                #left align
+                   vjust = 2,                #raise slightly
+                   colour = "white"),
+      
+      plot.subtitle = element_text(          #subtitle
+                   family = font,            #font family
+                   size = 14),               #font size
+      
+      plot.caption = element_text(           #caption
+                   family = font,            #font family
+                   size = 9,                 #font size
+                   hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+                   family = font,            #font family
+                   size = 10,                #font size
+                   colour = "white"),
+      
+      axis.text = element_text(              #axis text
+                   family = font,            #axis famuly
+                   size = 9,                 #font size
+                   colour = "white"),
+      
+      axis.text.x = element_text(            #margin for axis text
+                    margin=margin(5, b = 10)),
+      
+      
+      # legend
+      legend.background = element_rect(color = NA, fill = "grey24"),
+      legend.key = element_rect(color = "white",  fill = "grey24"),
+
+      legend.title = element_text(
+                     colour = "white"),
+      
+      legend.text = element_text(
+                    colour = "white")
+    
+
+    )
+}
+```
+
+
+## Datasets
+
+I loaded my datasets below.
+
+```{r directory, include = F}
+soil_csv <- read_csv(here("data/soil/soil-data-final.csv"))
+soil_csv$invaded_status <- as.factor(soil_csv$invaded_status)
+```
+
+```{r data transformations}
+# sample ID
+soil_df <- soil_csv %>%
+  remove_rownames %>%
+  column_to_rownames(var = "sample_id") %>% 
+  dplyr::select(-site_number, -site_ab)
+
+# long format
+soil_long <- soil_csv %>% 
+  gather(analyses, measurement, P:N, avg_pH) %>% 
+  dplyr::select(-pH1, -pH2, -pH3)
+# View(soil_long)
+
+# wide format
+soil_wide <- soil_long %>% 
+  spread(analyses, measurement) %>% 
+  remove_rownames %>%
+  column_to_rownames(var = "sample_id") %>% 
+  dplyr::select(-site_ab)
+# View(soil_wide)
+
+soil_data <- soil_wide[c(1:3, 8:11)]
+soilchem_data <- soil_wide[c(8:11)]
+```
+
+# Map
+
+## Churchill
+
+```{r location of Churchill}
+countries <- c("Canada", "USA")
+canada <- map_data("world", region = "Canada")
+noram <- map_data("world", region = countries) 
+
+noram <- noram %>%
+  group_by(region) %>% 
+  filter(30 < lat & lat < 80) %>% 
+  filter(-110 < long, long < -90) %>% 
+  summarize(lat = min(lat)+5, long = mean(long))
+noram
+
+# Churchill 
+churchill <- data.frame(longitude = c(-94.1650), latitude = c(58.7684))
+```
+
+## Soil sampling sites
+
+```{r}
+# soil lat & long
+# unique soil sites
+soil_sites <- soil_csv %>% 
+  dplyr::select(sample_id, site_number, site_ab,
+                invaded_status, latitude, longitude) %>% 
+  filter(invaded_status == "invaded")
+```
+
+
+
+## sfmap
+
+```{r sf maps}
+world <- ne_countries(country = countries,
+                      scale = "medium", returnclass = "sf")
+```
+
+
+```{r sf Churchill}
+ggplot(data = world) +
+  geom_sf() +
+  coord_sf(xlim = c(-140, -55), ylim = c(40, 90), expand = TRUE) +
+  xlab("Longitude") + ylab("Latitude")  +
+  geom_point(data = churchill, aes(x = longitude, y = latitude), size = 3,
+             shape = 21, fill = "darkred") +
+  geom_text(data = noram, aes(x = long, y = lat, label = region),
+            colour = "black", check_overlap = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.5) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.3, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  theme_classic()
+
+# dark
+ggplot(data = world) +
+  geom_sf() +
+  coord_sf(xlim = c(-140, -55), ylim = c(40, 90), expand = TRUE) +
+  xlab("Longitude") + ylab("Latitude")  +
+  geom_point(data = churchill, aes(x = longitude, y = latitude), size = 3,
+             shape = 21, fill = "darkred") +
+  geom_text(data = noram, aes(x = long, y = lat, label = region),
+            colour = "black", check_overlap = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.5) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.3, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  theme_darkclassic()
+
+```
+
+
+
+```{r sf soil sampling sites}
+soil_sites1 <- st_as_sf(soil_sites,
+                        coords = c("longitude", "latitude"), 
+                       crs = "+proj=longlat +datum=NAD83 +units=m +no_defs +north")
+
+ggplot(data = world) + 
+  geom_sf() + 
+  geom_point(data = soil_sites, aes(x = longitude, y = latitude),
+          size = 0.5, shape = 21, fill = "black") +
+  coord_sf(xlim = c(-94.4, -93.6), ylim = c(58.6, 58.9), expand = TRUE) +
+  labs(x="Latitude", y = "Longitude") +
+  annotation_scale(location = "bl", width_hint = 0.5) +
+  annotation_north_arrow(location = "tr", which_north = "true",
+                         pad_x = unit(0.5, "in"), pad_y = unit(0.25, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  theme_classic()  
+
+# the map is wrong!
+```
+
+
+## ggmap
+
+
+```{r ggmap canada}
+# key
+register_google(key = "AIzaSyBozYYxjYwZ5TL8P9YIXFdHkW3F6Aa7WAQ", write = TRUE)
+
+# basemap
+canada_basemap <- get_map(location=c(lon = -94.1650, lat = 58.7684),
+                          zoom = 3,
+                   maptype = 'terrain-background',
+                   source = 'stamen')
+ggmap(canada_basemap)
+```
+
+https://cran.r-project.org/web/packages/ggmap/citation.html
+
+```{r ggmap churchill}
+map_churchill <- get_map(location = "Churchill, MB, Canada",
+                         zoom = 10,
+                         maptype = "watercolor",
+                         source = "stamen",
+                         # color = "bw",
+                         force = TRUE)
+
+
+# add dot 
+ggmap <- ggmap(canada_basemap) +
+  geom_point(data = churchill, aes(x = longitude, y = latitude), size = 3,
+             shape = 21, fill = "darkred") +
+  xlab("Longitude") + ylab("Latitude") +
+  geom_text(data = noram, aes(x = long, y = lat, label = region),
+            colour = "black", check_overlap = FALSE) +
+  theme_vz()
+ggmap
+```
+
+```{r canada map}
+inset_canada_map <- map_data("world", region = "canada") %>% 
+  ggplot() +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               fill = "white", colour = "black") +
+  geom_star(data = churchill,
+            aes(x = longitude , y = latitude),
+            size = 3,
+            fill = "black") +
+  theme(line = element_blank(),
+        axis.title = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA),
+        plot.background = element_blank())
+
+inset_canada_map
+```
+
+
+```{r ggmap soil sampling sites}
+main_churchill_map <- ggmap(map_churchill) +
+  geom_label_repel(data = soil_sites,
+            aes(x = longitude, y = latitude,
+                label = site_number),
+            size = 4,
+            max.overlaps = Inf) +
+  scalebar(location = "bottomright",
+           x.min = -95, x.max = -93.8,
+           y.min = 58.6, y.max = 58.8,
+           dist = 10, dist_unit = "km",
+           transform = TRUE, model = 'WGS84',
+           st.dist = 0.05, st.size = 3) +
+  labs(y = "Longitude", x = "Latitude") +
+  theme(panel.border = element_rect(colour = "black", fill=NA))
+
+main_churchill_map
+```
+
+```{r inset and main}
+final_map <- main_churchill_map +
+  inset(ggplotGrob(inset_canada_map),
+        xmin = -94.2, xmax = -93.72482,
+        ymin = 58.83, ymax = 59)
+final_map
+```
+
+
+<http://dmcglinn.github.io/quant_methods/lessons/multivariate_models.html>
+
+# Initial Summaries
+
+```{r summary interval plots}
+# mean, avg, sd by invaded/uninvaded
+soil_sum_inv <- soil_long %>% 
+  group_by(analyses, invaded_status) %>% 
+  dplyr::summarise(
+    count = n(),
+    mean = mean(measurement, na.rm = TRUE),
+    median = median(measurement, na.rm = TRUE),
+    IQR = IQR(measurement, na.rm = TRUE),
+    sd = sd(measurement, na.rm = TRUE),
+    se = sd / sqrt(count), na.rm = TRUE
+  )
+
+## interval plot
+fig_soil_sum_inv_intervalplot <- soil_sum_inv %>%
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_wrap(~analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(title = "Summary of Soil Analyses", x = "Invaded Status", y = "Measurement")
+
+fig_soil_sum_inv_intervalplot
+
+
+# mean, avg, sd by invaded/uninvaded and location
+soil_sum_invloc <- soil_long %>% 
+  group_by(analyses, invaded_status, location) %>% 
+  dplyr::summarise(
+    count = n(),
+    mean = mean(measurement, na.rm = TRUE),
+    median = median(measurement, na.rm = TRUE),
+    IQR = IQR(measurement, na.rm = TRUE),
+    sd = sd(measurement, na.rm = TRUE),
+    se = sd / sqrt(count), na.rm = TRUE
+  )
+
+
+## interval plot
+fig_soil_sum_invloc_intervalplot <- soil_sum_invloc %>%
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(location ~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(title = "Summary of Soil Analyses", x = "Invaded Status", y = "Measurement")
+
+fig_soil_sum_invloc_intervalplot
+
+```
+
+
+
+
+```{r patchwork intervalplot summary}
+## pH
+soil_sum_invloc_avgpH <- soil_sum_invloc %>%
+  filter(analyses == "avg_pH") %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(location ~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 6) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(y = "Average pH")
+
+## N
+soil_sum_invloc_N <- soil_sum_invloc %>%
+  filter(analyses == "N") %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(location ~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(y = "Total Nitrogen (% dry)")
+
+## C
+soil_sum_invloc_C <- soil_sum_invloc %>%
+  filter(analyses == "C") %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(location ~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Total Carbon (% dry)")
+
+## P
+soil_sum_invloc_P <- soil_sum_invloc %>%
+  filter(analyses == "P") %>% 
+  ggplot(aes(x = invaded_status, y = mean, colour = invaded_status)) + 
+  geom_line() + 
+  facet_grid(location ~ analyses) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd,
+                width  = 0.1)) +
+  expand_limits(y = 0) + 
+  theme_darkclassic() + scale_colour_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(x = "Invaded Status", y = "Phosphorous Soil Mass (mg/kg dry)")
+
+fig_soil_sum_invloc_patchwork <- (soil_sum_invloc_avgpH | soil_sum_invloc_N) / (soil_sum_invloc_C | soil_sum_invloc_P)
+fig_soil_sum_invloc_patchwork
+
+```
+
+# Standardization
+
+Need to use *z*-scores
+
+Correlation chart
+
+```{r}
+soilchem_data %>% 
+  chart.Correlation()
+```
+Variable are autocorrelated - multicollinearity
+
+```{r}
+# soil_data %>% 
+#   corvif() 
+```
+
+
+# PCA
+
+## Using `prcomp`
+
+```{r}
+soil_pca <- soilchem_data %>% 
+  filter(!is.na(avg_pH)) %>% 
+  prcomp(scale = T, center = T) # Pipe directly into base R function for PCA
+
+# soil_princomp <- princomp(soil_data, cor = TRUE)
+summary(soil_pca)
+
+str(soil_pca)
+```
+
+```{r}
+soil_pca$rotation
+soil_pca$x
+```
+
+```{r autoplot coloured by invasion}
+soil_pca_values <- data.frame(invaded_status = soil_wide$invaded_status, soil_pca$x)
+soil_pca_loadings <- data.frame(soil_var = rownames(soil_pca$rotation), soil_pca$rotation)
+
+
+fig_soil_pca_bw <- autoplot(soil_pca,
+         loadings = TRUE, loadings.label = FALSE, loadings.colour = "black",
+         # label = TRUE,
+         size = 2,
+         data = soil_data,
+         shape = "invaded_status",) +
+  scale_shape_manual(values = c(1, 4), "Invasion status") +
+  annotate("text", x = soil_pca_loadings$PC1*0.65, y = soil_pca_loadings$PC2*0.65,
+           label = c("pH", "Carbon", "Nitrogen", "Phosphorous"),
+           size = 3) +
+  theme_classic()
+fig_soil_pca_bw
+
+# dark pca
+fig_soil_pca_dark <- autoplot(soil_pca,
+         loadings = TRUE, loadings.label = FALSE,
+         # label = TRUE,
+         loadings.colour = "black",
+         # label = TRUE,
+         size = 2,
+         data = soil_data,
+         # shape = "invaded_status", 
+         colour = "invaded_status") +
+  scale_shape_manual(values = c(1, 4), "Invasion status") +
+  scale_colour_brewer(palette = "Set1", "Invasion status") +
+  annotate("text", x = soil_pca_loadings$PC1*0.7, y = soil_pca_loadings$PC2*0.7,
+           label = c("pH", "Carbon", "Nitrogen", "Phosphorous"),
+           size = 4,
+           colour = "white") +
+  theme_classic()
+
+fig_soil_pca_dark
+```
+
+```{r autoplot coloured by location}
+autoplot(soil_pca,
+         loadings = TRUE, loadings.label = TRUE, loadings.colour = "black",
+         label = TRUE,
+         size = 0.2,
+         data = soil_data,
+         colour = "location") +
+  scale_colour_brewer(palette = "Set1") +
+  theme_darkclassic()
+```
+
+```{r bind PC axes}
+axes <- data.frame(soil_pca$x)
+soil_data <- bind_cols(soil_data, axes) # Note order of rows!
+
+colnames(soil_data)
+```
+
+
+Variation summarized by axis 1 represents 70% of variation (eigenvalues).
+
+```{r biplot PCA, fig.cap = "Figure 2"}
+biplot(soil_pca, cex = 0.6, scale = 1, 
+       xlab = "Component 1: (%)",
+       ylab = "Component 2: (%)")
+```
+
+Relative orientation and length of vectors (eigenvectors)
+
+-   phosphorous is the main difference
+
+## Redundancy Analysis
+
+```{r rda}
+soil_rda <- rda(soilchem_data, scale = TRUE)
+summary(soil_rda)
+```
+
+```{r biplot rda}
+biplot(soil_rda, scaling = 1)
+biplot(soil_rda, scaling = 2)
+```
+
+Note that vegan's scaling is different than a normal biplot.
+
+## Number of axes
+
+How many axes is useful? Confirm 4 components/axes is good. Less?
+
+```{r scree of RDA and PCA}
+screeplot(soil_pca, bstick = TRUE, type = "lines")
+screeplot(soil_rda, bstick = TRUE, type = "lines")
+```
+
+```{r scree from `psych`}
+scree(soilchem_data)
+```
+
+Should be using 1 eigenvalue (not all 4). That means one has a large impact.
+
+```{r}
+parallel <- fa.parallel(soilchem_data, fm = 'minres', fa = 'fa')
+```
+
+1 to 2 factors. Makes sense since I only have 4 variables
+
+## Is the PCA meaningful?
+
+```{r generating random data}
+rand1 <- rnorm(112, 0, 1)
+rand_df <- matrix(rand1, ncol = 4, nrow = 28)
+```
+
+```{r}
+rand_rda <- rda(rand_df, scale = TRUE)
+summary(rand_rda)
+biplot(rand_rda)
+screeplot(rand_rda, type = "lines")
+```
+
+# Principle Coordinates Analysis
+
+Convert data to Euclidean distance: <https://cran.r-project.org/web/packages/philentropy/vignettes/Distances.html>
+
+```{r Euclidean distance}
+soil_disteu <- dist(soilchem_data, method = "euclidean") # distance matrix using Euclidean distance
+soil_vegdisteu <- vegdist(soilchem_data, "euc") # using `vegan`
+
+soil_vegdistbray <- vegdist(soilchem_data, method = "bray") # Bray Curtis distance metric
+```
+
+```{r pcoa disteu}
+soil_pcoa_eu <- cmdscale(soil_disteu, k = 2, eig = TRUE, add = FALSE, x.ret = TRUE)
+soil_pcoa_eu
+```
+
+This should give the same results as the PCA
+
+```{r pcoa vegdistbray}
+soil_pcoa_bray <- cmdscale(soil_vegdistbray, k = 2, eig = TRUE, add = FALSE, x.ret = TRUE)
+soil_pcoa_bray
+```
+
+```{r plot pcoa euclidean}
+plot(soil_pcoa_eu$point, cex = 0.001)
+text(soil_pcoa_eu$point, labels = rownames(soil_pcoa_eu$point), cex = 0.6, font = 1)
+```
+
+Compare this to original figure (Figure ).
+
+```{r plot pcoa bray-curtis}
+plot(soil_pcoa_bray$point, cex = 0.001,
+     xlab = "Axis 1",
+     ylab = "Axis 2")
+text(soil_pcoa_bray$point, labels = rownames(soil_pcoa_bray$point), cex = 0.6, font = 1)
+```
+
+Using Bray-Curtis gave an horseshoe effect.
+
+# Non-metric Dimensional Scaling
+
+```{r nmds 1 euclidean}
+set.seed(1)
+soil_nmds1 <- metaMDS(soil_data, dist = "eu", k = 2, trymax = 100)
+soil_nmds1
+stressplot(soil_nmds1)
+```
+
+```{r goodness of fit nmds1}
+gof1 <- goodness(soil_nmds1)
+plot(soil_nmds1, type = "t", main = "goodness of fit")
+points(soil_nmds1, display = "sites", cex = gof1 * 1000)
+```
+
+```{r nmds 2 bray}
+set.seed(1)
+soil_nmds2 <- metaMDS(soil_data, dist = "bray", k = 2, trymax = 100)
+soil_nmds2
+stressplot(soil_nmds2)
+```
+
+```{r NMDS stress}
+soil_nmds1$stress
+soil_nmds2$stress
+```
+
+Stress at 0.02 for Euclidean and 0.04 Bray-Curtis, which is good.
+
+```{r adding soil variable fit}
+soil_fit <- envfit(soil_nmds1, soil_data, permu = 999)
+soil_fit
+```
+
+```{r NMDS initial plot}
+ordiplot(soil_nmds1,type = "n")
+# orditorp(soil_nmds1, display = "species", col = "red", air = 0.01)
+orditorp(soil_nmds1, display = "sites", cex = 0.6, air = 0.01)
+
+plot(soil_fit, p.max = 0.05) # only display variables that are significant
+
+plot(soil_nmds1, type = "t")
+```
+
+The arrow(s) point to the direction of most rapid change in the environmental variable. Often this is called the direction of the gradient. The length of the arrow(s) is proportional to the correlation between ordination and environmental variable. Often this is called the strength of the gradient.
+
+```{r nmds1 coloured plot}
+ordiplot(soil_nmds1, type = "n")
+ordihull(soil_nmds1, groups = inv_status, draw = "polygon", label = F)
+orditorp(soil_nmds1, display = "species", col = "blue", air = 0.01)
+orditorp(soil_nmds1, display = "sites", col = "grey9",
+         air = 0.01, cex = 0.6)
+```
+
+Invaded sites in red, uninvaded sites in blue. N in invaded sites, P in uninvaded sites
+
+```{r nmds2 coloured plot}
+ordiplot(soil_nmds2, type = "n")
+ordihull(soil_nmds2, groups = inv_status, draw = "polygon", col = c("lightgreen", "lightblue4"), label = F)
+orditorp(soil_nmds2, display = "species", col = "red", air = 0.01)
+orditorp(soil_nmds2, display = "sites", col = "grey9",
+         air = 0.01, cex = 0.6)
+```
+
+Similar results for Bray-Curtis and Euclidean distance.
+
+## NMDS in ggplot
+
+```{r nmds1 scores}
+nmds1_scores <- as.data.frame(scores(soil_nmds2, display = "sites"))
+nmds1_scores <- cbind(nmds1_scores, inv_status = soil_data$invaded_status)
+nmds1_scores <- cbind(nmds1_scores, location = soil_data$location)
+nmds1_scores <- cbind(nmds1_scores, site = rownames(nmds1_scores))
+
+head(nmds1_scores)
+```
+
+```{r nmds2 hulls}
+nmds1_scores <- na.omit(nmds1_scores) #chull function does not work with missing data
+find_hull <- function(nmds1_scores) nmds1_scores[chull(nmds1_scores$NMDS1, nmds1_scores$NMDS2), ]
+hulls <- plyr::ddply(nmds1_scores, "inv_status", find_hull)
+```
+
+
+
+```{r nmds}
+fig_soil_nmds_bw <- ggplot(data = nmds1_scores, aes(x = NMDS1, y = NMDS2,
+                                shape = factor(inv_status),
+                                colour = factor(inv_status)), size = 2) + 
+  geom_point() +
+  coord_fixed() +
+  theme(panel.background = element_rect(fill = NA, colour = "black",
+                                        size = 1, linetype = "solid")) +
+  scale_colour_manual(values = c("grey33", "grey55"), "Invasion status") +
+  scale_shape_manual(values = c(1, 4), "Invasion status") +
+  geom_polygon(data = hulls, alpha = 0.30) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        axis.text = element_text(size = 10)) + # add legend at right of plot
+  theme_classic()
+fig_soil_nmds_bw
+
+# dark
+fig_soil_nmds_dark <- ggplot(data = nmds1_scores, aes(x = NMDS1, y = NMDS2,
+                                shape = factor(inv_status),
+                                colour = factor(inv_status)), size = 2) + 
+  geom_point() +
+  coord_fixed() +
+  theme(panel.background = element_rect(fill = NA, colour = "black",
+                                        size = 1, linetype = "solid")) +
+  scale_colour_brewer(palette = "Set1", "Invasion status") +
+  scale_shape_manual(values = c(1, 4), "Invasion status") +
+  geom_polygon(data = hulls, alpha = 0.30) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        axis.text = element_text(size = 10)) + # add legend at right of plot
+  theme_darkclassic()
+fig_soil_nmds_dark
+```
+
+
+
+# Cluster Analysis
+
+```{r single/nearest neighbour linkage}
+soil_single <- hclust(soil_disteu, method = "single") # single linkage
+plot(soil_single)
+```
+
+```{r k-means}
+soil_kmeans <- kmeans(soil_data, centers = 3, nstart = 100)
+soil_kmeans
+```
+
+```{r cascade}
+sim_cascadeKM <- cascadeKM(soil_data, inf.gr = 2, sup.gr = 5, # generate solutions based on range in the number of defined groups 
+                           iter = 100, criterion = "calinski")
+plot(sim_cascadeKM, sortg = TRUE)
+```
+
+Pick groups where Calinski criterion is maximized = 5?
+
+```{r cophenetic correlation}
+coph_single <- cophenetic(soil_single)
+plot(coph_single)
+```
+
+```{r UPGMA silhouette}
+soil_average <- hclust(soil_disteu, method = "average") # average clustering
+cutg <- cutree(soil_average, k = 3)
+sil <- silhouette(cutg, soil_disteu)
+rownames(sil) <- rownames(soil_data)
+silo <- sortSilhouette(sil)
+plot(silo, main = "SilhouettePlot - UPGMA - Euclidean")
+```
+
+Negative silhouette score indicative of putting observation in a group that it doesn't fit well in. Probably better classified in another group. May be in part due to the fact that observations may have been included later in hierarchical classification may not be best fit conditioned on early groupings
+
+```{r c-means}
+soil_fuzzy <- fanny(soil_disteu, k = 3, memb.exp = 1.5)
+summary(soil_fuzzy)
+soil_fuzzy_gr <- soil_fuzzy$clustering
+soil_fuzzy_gr
+```
+
+Get a sense of how strong the relationship is between any individual observation is to any cluster. Soil samples demonstrate more similarity to location rather than invaded and uninvaded
+
+```{r fuzzy sillouette}
+plot(silhouette(soil_fuzzy), main = "Fuzzy Clustering Silhouette Plot")
+```
+
+Group clusters on the right. Overall average: higher numbers indicate better conditions Observation 1B has low silhouette width relative to others in group 2 Visual way to examine. Slightly better silhouette than previous one
+
+Longer distances not estimated effectively
+
+# Linear Discriminant Analysis
+
+```{r normality}
+scatterplotMatrix(soil_wide[7:10])
+soil_wide_lda <- soil_wide[7:10]
+```
+
+```{r training}
+set.seed(123)
+training.samples <- soil_wide_lda$inv_loc %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data <- soil_wide_lda[training.samples, ]
+test.data <- soil_wide_lda[-training.samples, ]
+```
+
+```{r}
+# Estimate preprocessing parameters
+preproc.param <- train.data %>% 
+  preProcess(method = c("center", "scale"))
+# Transform the data using the estimated parameters
+train.transformed <- preproc.param %>% predict(train.data)
+test.transformed <- preproc.param %>% predict(test.data)
+```
+
+```{r}
+# Predicted classes
+head(predictions$class, 6)
+# Predicted probabilities of class memebership.
+head(predictions$posterior, 6) 
+# Linear discriminants
+head(predictions$x, 3) 
+```
+
+```{r}
+lda_data <- cbind(train.transformed, predict(soil_lda_model)$x)
+ggplot(lda_data, aes(LD2, LD1)) +
+  geom_point(aes(color = inv_loc))
+```
+
+# Analysis of Similarities
+
+```{r anosim invaded status}
+soil_anosim <- anosim(soil_disteu, soil_data$invaded_status, distance = "euclidean", permutations = 999)
+summary(soil_anosim)
+plot(soil_anosim)
+```
+
+No statistical significance between invaded and uninvaded status for soil properties.
+
+## PERMANOVA
+
+```{r}
+soil_adonis <- anosim(soil_disteu, soil_data$location, distance = "euclidean", permutations = 999)
+soil_adonis
+```
+
+Also no significant differences in location
+
+# Procrustes Analysis
+
+```{r Procrustes for NMDS}
+soil_pro <- procrustes(soil_nmds1, soil_nmds2)
+plot(soil_pro)
+plot_spacer()
+summary(soil_pro)
+residuals(soil_pro)
+```
+
+```{r}
+plot(soil_pro)
+plot(soil_pro, kind = 2)
+```
+
+```{r protest}
+soil_protest <- protest(soil_pcoa_bray, soil_nmds1, scale = TRUE, permutations = 9999)
+plot(soil_protest)
+```
+
+This isn't correct - it should be used to compare ordinations that used two different sets of variables
+
+# Models
+
+## Initial Soil Models
+
+### C
+
+```{r C by invaded_status}
+# assumptions
+shapiro.test(soil_wide$C)
+var.test(C ~ invaded_status, data = soil_wide, alternative = "two.sided")
+
+# t-tests
+t.test(C ~ invaded_status, data = soil_wide,
+       paired = TRUE,
+       alternative = "two.sided", var.equal = FALSE)
+
+# wilcox tests - same results
+wilcox.test(C ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+pairwise_wilcox_test(C ~ invaded_status, data = soil_data,
+            alternative = "two.sided")
+
+wilcox_test(C ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+# same thing using lmer
+result_Cinv <- lmer(C ~ invaded_status + (1 | site_number), data = soil_data)
+summary(result_Cinv)
+anova(result_Cinv)
+Anova(result_Cinv, type = 3)
+```
+
+
+```{r C t-test and boxplots}
+# test, add p-value and significance levels
+stat_test <- soil_wide %>% 
+  wilcox_test(C ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+stat_test
+
+# boxplot with values
+soil_inv_Cttest <- ggboxplot(data = soil_wide, x = "invaded_status", y = "C",
+                          ylab = "C (% dry)", xlab = "Invaded status",
+                          add = "jitter") +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE))
+soil_inv_Cttest
+
+# boxplot with sig levels
+soil_inv_Cttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = C)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "C (% dry)") +
+  theme_classic()
+
+soil_inv_Cttest
+
+# boxplot with sig levels dark
+soil_inv_Cttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = C,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Cstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(Cstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "C (% dry)")+
+  theme_darkclassic() +
+  theme(legend.position = "none")
+
+soil_inv_Cttest_dark
+```
+
+
+```{r C by location}
+result_Cloc <- lm(C ~ location, data = soil_wide)
+summary(result_Cloc)
+
+Anova(result_Cloc, type = 3)
+```
+
+```{r C interaction}
+result_Cinvloc <- lm(C ~ invaded_status*location, data = soil_wide)
+result_Cinvloc <- aov(C ~ invaded_status*location, data = soil_wide)
+
+summary(result_Cinvloc)
+
+Anova(result_Cinvloc, type = 3)
+```
+
+
+```{r}
+result_Cinvloc <- aov(C ~ invaded_status*location, data = soil_wide)
+
+TukeyHSD(result_Cinvloc)
+
+postHocs <- glht(result_Cinvloc, linfct = mcp(invaded_status = "Tukey"))
+postHocs <- glht(result_Cinvloc, linfct = mcp(location = "Tukey"))
+
+#summary function gives results of multiple comparisons
+summary(postHocs)
+```
+
+
+```{r C emmeans}
+emC = emmeans(result_Cinvloc, specs = pairwise ~ invaded_status)
+emC = emmeans(result_Cinvloc, specs = pairwise ~ location)
+emC = emmeans(result_Cinvloc, specs = pairwise ~ invaded_status:location, adjust = "none")
+
+emC$emmeans
+```
+
+### N
+
+```{r N by invaded_status}
+# assumptions
+shapiro.test(soil_wide$N)
+var.test(N ~ invaded_status, data = soil_wide, alternative = "two.sided")
+
+# t-tests
+t.test(N ~ invaded_status, data = soil_wide,
+       paired = TRUE,
+       alternative = "two.sided", var.equal = FALSE)
+
+# wilcox tests - same results
+wilcox.test(N ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+pairwise_wilcox_test(N ~ invaded_status, data = soil_data,
+            alternative = "two.sided")
+
+wilcox_test(N ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+# same thing using lmer
+result_Ninv <- lmer(N ~ invaded_status + (1 | site_number), data = soil_data)
+summary(result_Ninv)
+anova(result_Ninv)
+Anova(result_Ninv, type = 3)
+```
+
+
+```{r N t-test and boxplots}
+# test, add p-value and significance levels
+stat_test <- soil_wide %>% 
+  wilcox_test(N ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+stat_test
+
+# boxplot with values
+soil_inv_Nttest <- ggboxplot(data = soil_wide, x = "invaded_status", y = "N",
+                          ylab = "N (% dry)", xlab = "Invaded status",
+                          add = "jitter") +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE))
+soil_inv_Nttest
+
+# boxplot with sig levels
+soil_inv_Nttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = N)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "N (% dry)") +
+  theme_classic()
+
+soil_inv_Nttest
+
+soil_inv_Nttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = N,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Nstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(Nstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "N (% dry)")
+soil_inv_Nttest_dark <- soil_inv_Nttest_dark + theme_darkclassic() +
+  theme(legend.position = "none")
+
+soil_inv_Nttest_dark
+```
+
+```{r N by location}
+result_Nloc <- lm(N ~ location, data = soil_wide)
+summary(result_Nloc)
+anova(result_Nloc)
+Anova(result_Nloc, type = 3)
+```
+
+```{r N interaction}
+result_Ninvloc <- lm(N ~ invaded_status*location, data = soil_wide)
+summary(result_Ninvloc)
+
+Anova(result_Ninvloc, type = 3)
+```
+
+### P
+
+```{r P by invaded_status}
+# assumptions
+shapiro.test(soil_wide$P)
+var.test(P ~ invaded_status, data = soil_wide, alternative = "two.sided")
+
+# t-tests
+t.test(P ~ invaded_status, data = soil_wide,
+       paired = TRUE,
+       alternative = "two.sided", var.equal = FALSE)
+
+# wilcox tests - same results
+wilcox.test(P ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+pairwise.wilcox.test(soil_data$P, soil_data$invaded_status,
+                 p.adjust.method = "BH")
+
+pairwise_wilcox_test(P ~ invaded_status, data = soil_data,
+            alternative = "two.sided")
+
+# Wilcoxon signed rank test on paired samples
+wilcox_test(P ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+
+
+# same thing using lmer
+result_Pinv <- lmer(P ~ invaded_status + (1 | site_number), data = soil_data)
+summary(result_Pinv)
+anova(result_Pinv)
+Anova(result_Pinv, type = 3)
+```
+
+
+```{r P t-test and boxplots}
+# test, add p-value and significance levels
+stat_test <- soil_wide %>% 
+  wilcox_test(P ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+stat_test
+
+# boxplot with values
+soil_inv_Pttest <- ggboxplot(data = soil_wide, x = "invaded_status", y = "P",
+                          ylab = "P (mg/kg)", xlab = "Invaded status",
+                          add = "jitter") +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE))
+soil_inv_Pttest
+
+# boxplot with sig levels
+soil_inv_Pttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = P)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "P (mg/kg)") +
+  theme_classic()
+
+soil_inv_Pttest
+
+
+# boxplot with sig levels dark
+soil_inv_Pttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = P,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(Pstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(Pstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "P (% dry)") +
+  theme_darkclassic() +
+  theme(legend.position = "none")
+
+soil_inv_Pttest_dark
+```
+
+
+
+
+```{r P by location}
+result_Ploc <- lm(P ~ location, data = soil_wide)
+summary(result_Ploc)
+anova(result_Ploc)
+Anova(result_Ploc, type = 3)
+```
+
+```{r P interaction}
+result_Pinvloc <- lm(P ~ invaded_status*location, data = soil_wide)
+summary(result_Pinvloc)
+
+Anova(result_Pinvloc, type = 3)
+
+summary(aov(P ~ invaded_status*location, data = soil_wide))
+```
+
+
+### pH
+
+```{r pH by invaded_status}
+# assumptions
+shapiro.test(soil_wide$avg_pH)
+var.test(avg_pH ~ invaded_status, data = soil_wide, alternative = "two.sided")
+
+# t-tests
+t.test(avg_pH ~ invaded_status, data = soil_wide,
+       paired = TRUE,
+       alternative = "two.sided", var.equal = FALSE)
+
+# wilcox tests - same results
+wilcox.test(avg_pH ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+pairwise_wilcox_test(avg_pH ~ invaded_status, data = soil_data,
+            alternative = "two.sided")
+
+wilcox_test(avg_pH ~ invaded_status, data = soil_data,
+            paired = TRUE,
+            alternative = "two.sided")
+
+# same thing using lmer
+result_avg_pHinv <- lmer(avg_pH ~ invaded_status + (1 | site_number), data = soil_data)
+summary(result_avg_pHinv)
+anova(result_avg_pHinv)
+Anova(result_avg_pHinv, type = 3)
+```
+
+
+```{r avg_pH t-test and boxplots}
+# test, add p-value and significance levels
+stat_test <- soil_wide %>% 
+  wilcox_test(avg_pH ~ invaded_status,
+         paired = TRUE,
+         alternative = "two.sided") %>%
+  add_significance() %>% 
+  add_xy_position()
+stat_test
+
+# boxplot with values
+soil_inv_Pttest <- ggboxplot(data = soil_wide, x = "invaded_status", y = "avg_pH",
+                          ylab = "Average pH)", xlab = "Invaded status",
+                          add = "jitter") +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE))
+soil_inv_Pttest
+
+# boxplot with sig levels
+soil_inv_pHttest <- ggplot(data = soil_wide, aes(x = invaded_status, y = avg_pH)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  stat_pvalue_manual(stat_test, tip.length = 0) +
+  labs(subtitle = get_test_label(stat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "Average pH") +
+  theme_classic()
+
+soil_inv_pHttest
+
+# boxplot with sig levels dark
+soil_inv_pHttest_dark <- ggplot(data = soil_wide,
+                          aes(x = invaded_status, y = avg_pH,
+                              colour = invaded_status)) +
+  geom_boxplot(fill = "grey24", size = 1.25) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_colour_brewer(palette = "Set1") +
+  stat_pvalue_manual(pHstat_test, tip.length = 0,
+                     color = "white") +
+  labs(subtitle = get_test_label(pHstat_test, detailed = TRUE)) +
+  labs(x = "Invaded Status", y = "P (% dry)") +
+  theme_darkclassic() +
+  theme(legend.position = "none")
+soil_inv_pHttest_dark
+```
+
+
+
+
+```{r pH by location}
+result_pHloc <- lm(avg_pH ~ location, data = soil_wide)
+summary(result_pHloc)
+anova(result_pHloc)
+Anova(result_pHloc, type = 3)
+```
+
+```{r pH interaction}
+result_pHinvloc <- lm(avg_pH ~ invaded_status*location, data = soil_wide)
+summary(result_pHinvloc)
+
+Anova(result_pHinvloc, type = 3)
+
+summary(aov(avg_pH ~ invaded_status*location, data = soil_wide))
+```
+
+
+# Figures
+
+
+
+## By site
+
+
+
+```{r all locations}
+soil_long %>% 
+  filter(!is.na(location)) %>% 
+  ggplot(aes(x = invaded_status, y = measurement)) + 
+  geom_boxplot() + 
+  facet_grid(~ analyses) +
+  theme_darkclassic() +
+  ylab("Measurement") + xlab("Invaded Status")
+```
+
+
+```{r with t-test}
+fig_soil_ttest_inv <- soil_inv_Cttest + soil_inv_Nttest + soil_inv_Pttest + soil_inv_pHttest
+```
+
+## By locations
+
+
+```{r graph c}
+soil_long %>% 
+  filter(!is.na(location),
+         analyses == "C") %>% 
+  ggplot(aes(x = invaded_status, y = measurement)) + 
+  geom_boxplot() + 
+  facet_grid(~ location) +
+  theme_darkclassic() +
+  labs(y = "Measurement", x = "Invaded Status",
+       title = "Soil chemical analyses - carbon (% dry)")
+```
+
+```{r graph N}
+soil_long %>% 
+  filter(!is.na(location),
+         analyses == "N") %>% 
+  ggplot(aes(x = invaded_status, y = measurement)) + 
+  geom_boxplot() + 
+  facet_grid(~ location) +
+  theme_darkclassic() +
+  labs(y = "Measurement", x = "Invaded Status",
+       title = "Soil chemical analyses - nitrogen (% dry)")
+```
+
+```{r graph P}
+soil_long %>% 
+  filter(!is.na(location),
+         analyses == "P") %>% 
+  ggplot(aes(x = invaded_status, y = measurement)) + 
+  geom_boxplot() + 
+  facet_grid(~ location) +
+  theme_darkclassic() +
+  labs(y = "Measurement", x = "Invaded Status",
+       title = "Soil chemical analyses - phosphorous (mg/kg)")
+```
+
